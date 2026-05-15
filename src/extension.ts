@@ -7,6 +7,8 @@ import {
 } from './providers/vueComponentProvider';
 import { VueComponentHoverProvider } from './providers/vueHoverProvider';
 import { VueCompletionProvider } from './providers/vueCompletionProvider';
+import { createVueProvideInjectIndex } from './providers/vueProvideInjectIndex';
+import { VueInjectDefinitionProvider, VueProvideReferenceProvider } from './providers/vueProvideInjectProvider';
 import { clearAliasCache } from './config/aliasResolver';
 import { affLog } from './affLog';
 import { clearVueParserCache } from './utils/vueParser';
@@ -55,6 +57,22 @@ export function activate(context: vscode.ExtensionContext) {
         )
     );
 
+    // ── 功能四：Vue provide / inject 字符串键 ───────────────────────────
+    const vueProvideInjectIndex = createVueProvideInjectIndex();
+    context.subscriptions.push(vueProvideInjectIndex);
+    context.subscriptions.push(
+        vscode.languages.registerDefinitionProvider(
+            VUE_PROVIDER_SELECTOR,
+            new VueInjectDefinitionProvider(vueProvideInjectIndex)
+        )
+    );
+    context.subscriptions.push(
+        vscode.languages.registerReferenceProvider(
+            VUE_PROVIDER_SELECTOR,
+            new VueProvideReferenceProvider(vueProvideInjectIndex)
+        )
+    );
+
     // ── 配置变更 & 文件监听：清除缓存 ────────────────────────────────────
     context.subscriptions.push(
         vscode.workspace.onDidChangeConfiguration(e => {
@@ -69,6 +87,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.workspace.onDidSaveTextDocument(doc => {
             if (doc.languageId === 'vue') {
                 clearVueParserCache();
+                vueProvideInjectIndex.invalidate();
             }
         })
     );
@@ -86,6 +105,8 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('alias-file-finder.clearCache', () => {
             clearAliasCache();
             clearVueParserCache();
+            vueProvideInjectIndex.invalidate();
+            void vueProvideInjectIndex.ensureReady();
             vscode.window.showInformationMessage('Alias File Finder：缓存已清除');
         })
     );
