@@ -6,4 +6,9 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+- Reposition the extension as Front Intelligence.
+- Add the `frontIntelligence` configuration namespace.
+- Add custom-first alias settings with automatic alias detection from common frontend config files.
+- Add performance profile scaffolding for low power, balanced, and high performance modes.
+- Keep compatibility with `aliasFileFinder.aliases` and `alias-file-finder.clearCache`.
 - Initial release
