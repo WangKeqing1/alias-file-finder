@@ -10,6 +10,7 @@ import {
 	DEFAULT_EXCLUDE_PATTERNS,
 	DEFAULT_ALIAS_SOURCES,
 } from '../config/settingsService';
+import { resolvePerformanceProfile } from '../core/performanceScheduler';
 
 suite('Extension Test Suite', () => {
 	vscode.window.showInformationMessage('Start all tests.');
@@ -48,6 +49,31 @@ suite('Extension Test Suite', () => {
 				'@legacy': ['legacy/src'],
 			});
 		});
+	});
+
+	test('performance profile resolves balanced defaults', () => {
+		const profile = resolvePerformanceProfile({
+			mode: 'balanced',
+			maxWorkers: 0,
+			backgroundIndexing: 'auto',
+		});
+
+		assert.strictEqual(profile.mode, 'balanced');
+		assert.ok(profile.workerCount >= 1);
+		assert.strictEqual(profile.backgroundIndexing, 'auto');
+		assert.strictEqual(profile.batchSize, 40);
+	});
+
+	test('performance profile honors explicit maxWorkers', () => {
+		const profile = resolvePerformanceProfile({
+			mode: 'highPerformance',
+			maxWorkers: 3,
+			backgroundIndexing: 'auto',
+		});
+
+		assert.strictEqual(profile.workerCount, 3);
+		assert.strictEqual(profile.backgroundIndexing, 'aggressive');
+		assert.strictEqual(profile.batchSize, 80);
 	});
 });
 
