@@ -9,7 +9,7 @@ import { VueComponentHoverProvider } from './providers/vueHoverProvider';
 import { VueCompletionProvider } from './providers/vueCompletionProvider';
 import { createVueProvideInjectIndex } from './providers/vueProvideInjectIndex';
 import { VueInjectDefinitionProvider, VueProvideReferenceProvider } from './providers/vueProvideInjectProvider';
-import { clearAliasCache } from './config/aliasResolver';
+import { clearAliasCache, getAliases } from './config/aliasResolver';
 import { affLog } from './affLog';
 import { clearVueParserCache } from './utils/vueParser';
 
@@ -60,6 +60,11 @@ export function activate(context: vscode.ExtensionContext) {
     // ── 功能四：Vue provide / inject 字符串键 ───────────────────────────
     const vueProvideInjectIndex = createVueProvideInjectIndex();
     context.subscriptions.push(vueProvideInjectIndex);
+    const clearAllCaches = () => {
+        clearAliasCache();
+        clearVueParserCache();
+        vueProvideInjectIndex.invalidate();
+    };
     context.subscriptions.push(
         vscode.languages.registerDefinitionProvider(
             VUE_PROVIDER_SELECTOR,
@@ -76,7 +81,10 @@ export function activate(context: vscode.ExtensionContext) {
     // ── 配置变更 & 文件监听：清除缓存 ────────────────────────────────────
     context.subscriptions.push(
         vscode.workspace.onDidChangeConfiguration(e => {
-            if (e.affectsConfiguration('aliasFileFinder')) {
+            if (
+                e.affectsConfiguration('aliasFileFinder') ||
+                e.affectsConfiguration('frontIntelligence')
+            ) {
                 clearAliasCache();
             }
         })
@@ -93,7 +101,7 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     const aliasConfigWatcher = vscode.workspace.createFileSystemWatcher(
-        '**/{tsconfig.json,jsconfig.json,vite.config.*,webpack.config.*,vue.config.*,nuxt.config.*}'
+        '**/{tsconfig.json,jsconfig.json,vite.config.*,webpack.config.*,vue.config.*,nuxt.config.*,config.*}'
     );
     aliasConfigWatcher.onDidChange(() => clearAliasCache());
     aliasConfigWatcher.onDidCreate(() => clearAliasCache());
@@ -101,13 +109,38 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(aliasConfigWatcher);
 
     // ── 命令：手动清除所有缓存 ────────────────────────────────────────────
+    const registerClearCacheCommand = (command: string) =>
+        vscode.commands.registerCommand(command, () => {
+            clearAllCaches();
+            vscode.window.showInformationMessage('Front Intelligence：缓存已清除');
+        });
+
+    context.subscriptions.push(registerClearCacheCommand('frontIntelligence.clearCache'));
+    context.subscriptions.push(registerClearCacheCommand('alias-file-finder.clearCache'));
     context.subscriptions.push(
-        vscode.commands.registerCommand('alias-file-finder.clearCache', () => {
-            clearAliasCache();
-            clearVueParserCache();
-            vueProvideInjectIndex.invalidate();
-            void vueProvideInjectIndex.ensureReady();
-            vscode.window.showInformationMessage('Alias File Finder：缓存已清除');
+        vscode.commands.registerCommand('frontIntelligence.showResolvedAliases', () => {
+            const folders = vscode.workspace.workspaceFolders || [];
+            if (folders.length === 0) {
+                vscode.window.showInformationMessage('Front Intelligence：当前没有打开工作区文件夹');
+                return;
+            }
+            const lines = folders.flatMap(folder => {
+                const aliases = getAliases(folder);
+                const entries = Object.entries(aliases);
+                if (entries.length === 0) {
+                    return [`${folder.name}: 未解析到路径别名`];
+                }
+                return [
+                    `${folder.name}:`,
+                    ...entries.map(([key, values]) => `  ${key} -> ${values.join(', ')}`),
+                ];
+            });
+            vscode.window.showInformationMessage(lines.join('\n'));
+        })
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand('frontIntelligence.showIndexStatus', () => {
+            vscode.window.showInformationMessage('Front Intelligence：索引按需加载，当前版本提供别名和 Vue 缓存状态命令。');
         })
     );
 }

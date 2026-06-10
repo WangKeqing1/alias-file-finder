@@ -1,8 +1,8 @@
 {
   "name": "alias-file-finder",
   "publisher": "local",
-  "displayName": "Alias File Finder",
-  "description": "支持 CSS/SCSS/SASS/LESS 中带路径别名的 @import/@use 跳转，以及未 import 的 Vue 组件按命名跳转。",
+  "displayName": "Front Intelligence",
+  "description": "性能优先的 Vue/CSS 前端代码智能补强：支持路径别名、CSS 预处理器跳转、Vue 全局组件、组件文档与 provide/inject 识别。",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.105.0"
@@ -26,17 +26,204 @@
   "contributes": {
     "commands": [
       {
+        "command": "frontIntelligence.clearCache",
+        "title": "Front Intelligence: 清除缓存"
+      },
+      {
+        "command": "frontIntelligence.showResolvedAliases",
+        "title": "Front Intelligence: 显示已解析别名"
+      },
+      {
+        "command": "frontIntelligence.showIndexStatus",
+        "title": "Front Intelligence: 显示索引状态"
+      },
+      {
         "command": "alias-file-finder.clearCache",
         "title": "Alias File Finder: 清除别名缓存"
       }
     ],
     "configuration": {
-      "title": "Alias File Finder",
+      "title": "Front Intelligence",
       "properties": {
+        "frontIntelligence.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "启用 Front Intelligence 的所有补强能力。"
+        },
+        "frontIntelligence.performance.mode": {
+          "type": "string",
+          "default": "balanced",
+          "enum": [
+            "lowPower",
+            "balanced",
+            "highPerformance"
+          ],
+          "description": "性能模式。lowPower 更保守，balanced 为默认，highPerformance 更积极地使用设备性能。"
+        },
+        "frontIntelligence.performance.maxWorkers": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "最大并发 worker 数。0 表示根据性能模式自动判断。"
+        },
+        "frontIntelligence.performance.backgroundIndexing": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "off",
+            "auto",
+            "aggressive"
+          ],
+          "description": "后台索引策略。"
+        },
+        "frontIntelligence.files.include": {
+          "type": "array",
+          "default": [
+            "**/*.{vue,css,scss,sass,less,styl,stylus,postcss}"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "参与 Front Intelligence 解析的文件范围。"
+        },
+        "frontIntelligence.files.exclude": {
+          "type": "array",
+          "default": [
+            "**/node_modules/**",
+            "**/dist/**",
+            "**/build/**",
+            "**/out/**",
+            "**/.git/**",
+            "**/.next/**",
+            "**/.nuxt/**",
+            "**/.output/**",
+            "**/coverage/**"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Front Intelligence 扫描和索引时排除的路径。"
+        },
+        "frontIntelligence.alias.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "启用路径别名解析。"
+        },
+        "frontIntelligence.alias.autoDetect": {
+          "type": "boolean",
+          "default": true,
+          "description": "自动读取 tsconfig、jsconfig、vite、webpack、vue、nuxt、config 等配置中的 alias。"
+        },
+        "frontIntelligence.alias.sources": {
+          "type": "array",
+          "default": [
+            "tsconfig.json",
+            "jsconfig.json",
+            "vite.config.*",
+            "webpack.config.*",
+            "vue.config.*",
+            "nuxt.config.*",
+            "config.*"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "允许自动读取 alias 的配置来源。"
+        },
+        "frontIntelligence.alias.custom": {
+          "type": "object",
+          "default": {},
+          "description": "自定义路径别名。键为别名，值为相对工作区根目录的路径、绝对路径，或路径数组。",
+          "additionalProperties": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "array", "items": { "type": "string" } }
+            ]
+          }
+        },
+        "frontIntelligence.alias.priority": {
+          "type": "string",
+          "default": "custom-first",
+          "enum": [
+            "custom-first",
+            "auto-first"
+          ],
+          "description": "自定义别名和自动检测别名冲突时的优先级。"
+        },
+        "frontIntelligence.alias.fallbacks": {
+          "type": "object",
+          "default": {
+            "@": "src",
+            "~": "src"
+          },
+          "description": "自动检测和自定义配置都未命中时使用的别名兜底。仅在目标路径存在时生效。",
+          "additionalProperties": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "array", "items": { "type": "string" } }
+            ]
+          }
+        },
+        "frontIntelligence.css.aliasNavigation.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "启用 CSS 系列文件和 style 块中的别名路径跳转。"
+        },
+        "frontIntelligence.scss.symbolNavigation.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "启用 Sass/SCSS 符号导航能力。"
+        },
+        "frontIntelligence.scss.bemSelector.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "启用 BEM 和 & 父级选择器辅助解析。该能力默认关闭以避免误判。"
+        },
+        "frontIntelligence.vue.componentNavigation.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "启用 Vue 组件标签到组件文件的跳转。"
+        },
+        "frontIntelligence.vue.componentDocs.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "启用 Vue 组件 JSDoc、props、emits 文档提示。"
+        },
+        "frontIntelligence.vue.globalComponents.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "启用 Vue 全局组件识别。"
+        },
+        "frontIntelligence.vue.globalComponents.paths": {
+          "type": "array",
+          "default": [
+            "src/components/**/*.vue",
+            "src/**/components/**/*.vue"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "全局组件候选路径。"
+        },
+        "frontIntelligence.vue.provideInject.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "启用 Vue provide/inject 静态字符串 key 的定义跳转和引用查找。"
+        },
+        "frontIntelligence.debug.logging": {
+          "type": "boolean",
+          "default": false,
+          "description": "启用 Front Intelligence 调试日志。"
+        },
+        "frontIntelligence.debug.showIndexStatus": {
+          "type": "boolean",
+          "default": true,
+          "description": "启用索引状态相关命令和提示。"
+        },
         "aliasFileFinder.aliases": {
           "type": "object",
           "default": {},
-          "description": "自定义路径别名映射。键为别名（如 \"@\"），值为相对工作区根目录的路径或绝对路径，可以是字符串或字符串数组。",
+          "markdownDescription": "旧版兼容配置。请优先使用 `frontIntelligence.alias.custom`。键为别名（如 `@`），值为相对工作区根目录的路径或绝对路径，可以是字符串或字符串数组。",
           "additionalProperties": {
             "oneOf": [
               { "type": "string" },
