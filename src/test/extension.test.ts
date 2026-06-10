@@ -1,4 +1,7 @@
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 // You can import and use all API from the 'vscode' module
 // as well as import your extension to test it
@@ -11,6 +14,7 @@ import {
 	DEFAULT_ALIAS_SOURCES,
 } from '../config/settingsService';
 import { resolvePerformanceProfile } from '../core/performanceScheduler';
+import { clearAliasCache, getAliases } from '../config/aliasResolver';
 
 suite('Extension Test Suite', () => {
 	vscode.window.showInformationMessage('Start all tests.');
@@ -75,6 +79,84 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(profile.backgroundIndexing, 'aggressive');
 		assert.strictEqual(profile.batchSize, 80);
 	});
+
+	test('alias resolver prefers frontIntelligence custom aliases over auto aliases', () => {
+		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'front-intelligence-alias-'));
+		fs.mkdirSync(path.join(tempRoot, 'src'), { recursive: true });
+		fs.mkdirSync(path.join(tempRoot, 'custom-src'), { recursive: true });
+		fs.writeFileSync(path.join(tempRoot, 'tsconfig.json'), JSON.stringify({
+			compilerOptions: {
+				baseUrl: '.',
+				paths: {
+					'@/*': ['src/*'],
+				},
+			},
+		}));
+
+		try {
+			const folder = createWorkspaceFolder(tempRoot);
+			const root = folder.uri.fsPath;
+			withMockedConfiguration({
+				'frontIntelligence.alias.custom': {
+					'@': 'custom-src',
+				},
+			}, () => {
+				clearAliasCache();
+				const aliases = getAliases(folder);
+				assert.deepStrictEqual(aliases['@'], [
+					path.join(root, 'custom-src'),
+					path.join(root, 'src'),
+				]);
+			});
+		} finally {
+			fs.rmSync(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test('alias resolver prefers frontIntelligence custom aliases over legacy aliases', () => {
+		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'front-intelligence-legacy-alias-'));
+		fs.mkdirSync(path.join(tempRoot, 'legacy-src'), { recursive: true });
+		fs.mkdirSync(path.join(tempRoot, 'custom-src'), { recursive: true });
+
+		try {
+			const folder = createWorkspaceFolder(tempRoot);
+			const root = folder.uri.fsPath;
+			withMockedConfiguration({
+				'frontIntelligence.alias.autoDetect': false,
+				'frontIntelligence.alias.custom': {
+					'@': 'custom-src',
+				},
+				'aliasFileFinder.aliases': {
+					'@': 'legacy-src',
+				},
+			}, () => {
+				clearAliasCache();
+				const aliases = getAliases(folder);
+				assert.deepStrictEqual(aliases['@'], [
+					path.join(root, 'custom-src'),
+					path.join(root, 'legacy-src'),
+				]);
+			});
+		} finally {
+			fs.rmSync(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test('alias resolver returns no aliases when alias feature is disabled', () => {
+		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'front-intelligence-alias-disabled-'));
+		fs.mkdirSync(path.join(tempRoot, 'src'), { recursive: true });
+
+		try {
+			withMockedConfiguration({
+				'frontIntelligence.alias.enabled': false,
+			}, () => {
+				clearAliasCache();
+				assert.deepStrictEqual(getAliases(createWorkspaceFolder(tempRoot)), {});
+			});
+		} finally {
+			fs.rmSync(tempRoot, { recursive: true, force: true });
+		}
+	});
 });
 
 function withMockedConfiguration(
@@ -106,4 +188,12 @@ function withMockedConfiguration(
 			getConfiguration: typeof vscode.workspace.getConfiguration;
 		}).getConfiguration = oldGetConfiguration;
 	}
+}
+
+function createWorkspaceFolder(root: string): vscode.WorkspaceFolder {
+	return {
+		uri: vscode.Uri.file(root),
+		name: 'workspace',
+		index: 0,
+	};
 }

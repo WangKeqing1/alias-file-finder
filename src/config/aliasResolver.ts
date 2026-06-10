@@ -2,6 +2,11 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { affLog } from '../affLog';
+import {
+    getFrontIntelligenceSettings,
+    getLegacyAliasSettings,
+    type NormalizedAliasSettings,
+} from './settingsService';
 
 export interface AliasMap {
     [alias: string]: string[];
@@ -28,16 +33,31 @@ export function getAliases(workspaceFolder: vscode.WorkspaceFolder): AliasMap {
         return cached.aliases;
     }
 
+    const settings = getFrontIntelligenceSettings(workspaceFolder.uri);
+    if (!settings.enabled || !settings.alias.enabled) {
+        const aliases: AliasMap = {};
+        cache.set(cwd, { aliases, expireAt: now + CACHE_TTL });
+        return aliases;
+    }
+
     const aliases: AliasMap = {};
+    const customAliases = resolveConfiguredAliases(settings.alias.custom, cwd);
+    const legacyAliases = resolveConfiguredAliases(getLegacyAliasSettings(workspaceFolder.uri), cwd);
+    const autoAliases = settings.alias.autoDetect
+        ? readAutoAliases(cwd, settings.alias.sources)
+        : {};
+    const fallbackAliases = resolveExistingFallbackAliases(settings.alias.fallbacks, cwd);
 
-    mergeAliases(aliases, readFromUserSettings(workspaceFolder));
-    mergeAliases(aliases, readFromTsConfig(cwd));
-    mergeAliases(aliases, readFromViteConfig(cwd));
-    mergeAliases(aliases, readFromWebpackConfig(cwd));
-    mergeAliases(aliases, readFromNuxtConfig(cwd));
-    mergeAliases(aliases, readFromVueCliConfig(cwd));
-
-    ensureCommonDefaults(aliases, cwd);
+    if (settings.alias.priority === 'auto-first') {
+        mergeAliases(aliases, autoAliases);
+        mergeAliases(aliases, customAliases);
+        mergeAliases(aliases, legacyAliases);
+    } else {
+        mergeAliases(aliases, customAliases);
+        mergeAliases(aliases, legacyAliases);
+        mergeAliases(aliases, autoAliases);
+    }
+    mergeAliases(aliases, fallbackAliases);
 
     cache.set(cwd, { aliases, expireAt: now + CACHE_TTL });
     affLog('aliases:reload', {
@@ -64,31 +84,55 @@ function mergeAliases(target: AliasMap, src: AliasMap): void {
     }
 }
 
-function ensureCommonDefaults(aliases: AliasMap, cwd: string): void {
-    const srcDir = path.join(cwd, 'src');
-    if (fs.existsSync(srcDir)) {
-        if (!aliases['@']) {
-            aliases['@'] = [srcDir];
-        }
-        if (!aliases['~']) {
-            aliases['~'] = [srcDir];
-        }
-        if (!aliases['~@']) {
-            aliases['~@'] = [srcDir];
-        }
-    }
-}
-
-function readFromUserSettings(workspaceFolder: vscode.WorkspaceFolder): AliasMap {
-    const cfg = vscode.workspace.getConfiguration('aliasFileFinder', workspaceFolder.uri);
-    const userAliases = cfg.get<Record<string, string | string[]>>('aliases') || {};
+function resolveConfiguredAliases(raw: NormalizedAliasSettings, cwd: string): AliasMap {
     const out: AliasMap = {};
-    for (const key of Object.keys(userAliases)) {
-        const v = userAliases[key];
-        const arr = Array.isArray(v) ? v : [v];
-        out[key] = arr.map(p => resolveToAbs(p, workspaceFolder.uri.fsPath));
+    for (const [key, values] of Object.entries(raw)) {
+        out[key] = values.map(p => resolveToAbs(p, cwd));
     }
     return out;
+}
+
+function resolveExistingFallbackAliases(raw: NormalizedAliasSettings, cwd: string): AliasMap {
+    const out: AliasMap = {};
+    for (const [key, values] of Object.entries(raw)) {
+        const resolved = values
+            .map(p => resolveToAbs(p, cwd))
+            .filter(p => fs.existsSync(p));
+        if (resolved.length > 0) {
+            out[key] = resolved;
+        }
+    }
+    return out;
+}
+
+function readAutoAliases(cwd: string, sources: string[]): AliasMap {
+    const out: AliasMap = {};
+    if (isAliasSourceEnabled(sources, 'tsconfig.json')) {
+        mergeAliases(out, readFromTsConfig(cwd, ['tsconfig.json']));
+    }
+    if (isAliasSourceEnabled(sources, 'jsconfig.json')) {
+        mergeAliases(out, readFromTsConfig(cwd, ['jsconfig.json']));
+    }
+    if (isAliasSourceEnabled(sources, 'vite.config.*')) {
+        mergeAliases(out, readFromViteConfig(cwd));
+    }
+    if (isAliasSourceEnabled(sources, 'webpack.config.*')) {
+        mergeAliases(out, readFromWebpackConfig(cwd));
+    }
+    if (isAliasSourceEnabled(sources, 'nuxt.config.*')) {
+        mergeAliases(out, readFromNuxtConfig(cwd));
+    }
+    if (isAliasSourceEnabled(sources, 'vue.config.*')) {
+        mergeAliases(out, readFromVueCliConfig(cwd));
+    }
+    if (isAliasSourceEnabled(sources, 'config.*')) {
+        mergeAliases(out, readFromGenericConfig(cwd));
+    }
+    return out;
+}
+
+function isAliasSourceEnabled(sources: string[], source: string): boolean {
+    return sources.includes(source);
 }
 
 function resolveToAbs(p: string, cwd: string): string {
@@ -160,9 +204,8 @@ function stripJsonComments(text: string): string {
     return result;
 }
 
-function readFromTsConfig(cwd: string): AliasMap {
+function readFromTsConfig(cwd: string, candidates = ['tsconfig.json', 'jsconfig.json']): AliasMap {
     const out: AliasMap = {};
-    const candidates = ['tsconfig.json', 'jsconfig.json'];
     for (const name of candidates) {
         const full = path.join(cwd, name);
         const raw = safeReadFile(full);
@@ -267,6 +310,27 @@ function readFromNuxtConfig(cwd: string): AliasMap {
             continue;
         }
         Object.assign(out, parseAliasFromJsSource(raw, cwd));
+    }
+    return out;
+}
+
+function readFromGenericConfig(cwd: string): AliasMap {
+    const out: AliasMap = {};
+    const candidates = [
+        'config.ts',
+        'config.js',
+        'config.mts',
+        'config.mjs',
+        'config.cts',
+        'config.cjs',
+    ];
+    for (const name of candidates) {
+        const full = path.join(cwd, name);
+        const raw = safeReadFile(full);
+        if (!raw) {
+            continue;
+        }
+        mergeAliases(out, parseAliasFromJsSource(raw, cwd));
     }
     return out;
 }
