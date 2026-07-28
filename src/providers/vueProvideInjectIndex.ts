@@ -23,14 +23,10 @@ export class VueProvideInjectIndex implements vscode.Disposable {
     private ready: Promise<void> | null = null;
     private watcher?: vscode.FileSystemWatcher;
     private debounce?: ReturnType<typeof setTimeout>;
+    private pendingRescans = new Map<string, vscode.Uri>();
 
     initialize(): void {
-        this.ready = this.rebuild();
-        this.watcher = vscode.workspace.createFileSystemWatcher('**/*.vue');
-        const bump = () => this.scheduleRebuild();
-        this.watcher.onDidCreate(bump);
-        this.watcher.onDidDelete(bump);
-        this.watcher.onDidChange(bump);
+        // Lazy: no workspace scan or file watcher until provide/inject navigation is used.
     }
 
     dispose(): void {
@@ -43,13 +39,24 @@ export class VueProvideInjectIndex implements vscode.Disposable {
     /** 下次 ensureReady 会强制重建（用于手动清缓存） */
     invalidate(): void {
         this.ready = null;
+        this.provideByKey.clear();
+        this.injectByKey.clear();
+        this.pendingRescans.clear();
     }
 
     ensureReady(): Promise<void> {
+        this.ensureWatcher();
         if (!this.ready) {
             this.ready = this.rebuild();
         }
         return this.ready;
+    }
+
+    updateUri(uri: vscode.Uri): void {
+        if (!this.ready) {
+            return;
+        }
+        void this.ready.then(() => this.rescanUri(uri));
     }
 
     findProvideLocations(key: string): vscode.Location[] {
@@ -62,13 +69,33 @@ export class VueProvideInjectIndex implements vscode.Disposable {
         return list ? [...list] : [];
     }
 
-    private scheduleRebuild(): void {
+    private ensureWatcher(): void {
+        if (this.watcher) {
+            return;
+        }
+        this.watcher = vscode.workspace.createFileSystemWatcher('**/*.vue');
+        this.watcher.onDidCreate(uri => this.scheduleRescan(uri));
+        this.watcher.onDidChange(uri => this.scheduleRescan(uri));
+        this.watcher.onDidDelete(uri => this.removeUri(uri));
+    }
+
+    private scheduleRescan(uri: vscode.Uri): void {
+        if (!this.ready) {
+            return;
+        }
+        this.pendingRescans.set(uri.fsPath, uri);
         if (this.debounce) {
             clearTimeout(this.debounce);
         }
         this.debounce = setTimeout(() => {
             this.debounce = undefined;
-            this.ready = this.rebuild();
+            const uris = Array.from(this.pendingRescans.values());
+            this.pendingRescans.clear();
+            void this.ready?.then(async () => {
+                for (const pendingUri of uris) {
+                    await this.rescanUri(pendingUri);
+                }
+            });
         }, 250);
     }
 
@@ -91,24 +118,47 @@ export class VueProvideInjectIndex implements vscode.Disposable {
                 5000
             );
             for (const uri of uris) {
-                let text: string;
-                try {
-                    text = fs.readFileSync(uri.fsPath, 'utf-8');
-                } catch {
-                    continue;
-                }
-                const sites = scanVueProvideInjectKeys(text);
-                for (const s of sites) {
-                    const loc = siteToLocation(uri, text, s);
-                    if (s.kind === 'provide') {
-                        this.push(this.provideByKey, s.key, loc);
-                    } else {
-                        this.push(this.injectByKey, s.key, loc);
-                    }
-                }
+                await this.scanUri(uri);
             }
         } catch {
             // ignore
+        }
+    }
+
+    private async rescanUri(uri: vscode.Uri): Promise<void> {
+        this.removeUri(uri);
+        await this.scanUri(uri);
+    }
+
+    private async scanUri(uri: vscode.Uri): Promise<void> {
+        let text: string;
+        try {
+            text = await fs.promises.readFile(uri.fsPath, 'utf-8');
+        } catch {
+            return;
+        }
+        const sites = scanVueProvideInjectKeys(text);
+        for (const s of sites) {
+            const loc = siteToLocation(uri, text, s);
+            if (s.kind === 'provide') {
+                this.push(this.provideByKey, s.key, loc);
+            } else {
+                this.push(this.injectByKey, s.key, loc);
+            }
+        }
+    }
+
+    private removeUri(uri: vscode.Uri): void {
+        const fsPath = uri.fsPath;
+        for (const map of [this.provideByKey, this.injectByKey]) {
+            for (const [key, locations] of map) {
+                const kept = locations.filter(loc => loc.uri.fsPath !== fsPath);
+                if (kept.length === 0) {
+                    map.delete(key);
+                } else {
+                    map.set(key, kept);
+                }
+            }
         }
     }
 }

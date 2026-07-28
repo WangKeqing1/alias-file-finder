@@ -30,7 +30,7 @@ const SUPPORTED_LANGS = new Set([
  * 也兼容 sass 缩进语法（无分号）。
  */
 const IMPORT_REGEX =
-    /@(?:import|use|forward|require|import-once|include)\s+(?:url\(\s*)?(?:(['"])([^'"\n]+)\1|([^\s'"();]+))\s*\)?/g;
+    /@(?:import|use|forward|require|import-once)\s+(?:url\(\s*)?(?:(['"])([^'"\n]+)\1|([^\s'"();]+))\s*\)?/g;
 
 interface ParsedImport {
     raw: string;            // 原始 spec
@@ -122,6 +122,10 @@ function shouldTryPartial(langId: string): boolean {
     return langId === 'scss' || langId === 'sass' || langId === 'vue' || langId === 'html' || langId === 'svelte' || langId === 'astro';
 }
 
+function shouldResolveStyleSpec(spec: string): boolean {
+    return !/^sass:/i.test(spec.trim());
+}
+
 export class CssLinkProvider implements vscode.DocumentLinkProvider {
     provideDocumentLinks(
         document: vscode.TextDocument,
@@ -161,6 +165,9 @@ export class CssLinkProvider implements vscode.DocumentLinkProvider {
                 const link = new vscode.DocumentLink(range, vscode.Uri.parse(url));
                 link.tooltip = '在浏览器中打开';
                 links.push(link);
+                continue;
+            }
+            if (!shouldResolveStyleSpec(imp.raw)) {
                 continue;
             }
 
@@ -211,6 +218,9 @@ export class CssDefinitionProvider implements vscode.DefinitionProvider {
             return undefined;
         }
         if (isHttpUrl(hit.raw)) {
+            return undefined;
+        }
+        if (!shouldResolveStyleSpec(hit.raw)) {
             return undefined;
         }
         affLog('css:definition', { raw: hit.raw, file: document.uri.fsPath, workspace: ws.uri.fsPath });

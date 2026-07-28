@@ -60,7 +60,7 @@ function buildHoverMarkdown(
     otherUris: vscode.Uri[]
 ): vscode.MarkdownString {
     const md = new vscode.MarkdownString();
-    md.isTrusted = true;
+    md.isTrusted = false;
     md.supportHtml = false;
 
     const displayName = parsed.componentName || path.basename(primaryUri.fsPath, path.extname(primaryUri.fsPath));

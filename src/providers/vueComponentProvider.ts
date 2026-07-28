@@ -40,6 +40,7 @@ export class VueComponentIndex implements vscode.Disposable {
     private ready: Promise<void> | null = null;
 
     async ensureReady(): Promise<void> {
+        this.ensureWatcher();
         if (!this.ready) {
             this.ready = this.rebuild();
         }
@@ -47,7 +48,13 @@ export class VueComponentIndex implements vscode.Disposable {
     }
 
     initialize(): void {
-        this.ready = this.rebuild();
+        // Lazy: avoid scanning or watching the workspace until a Vue provider is used.
+    }
+
+    private ensureWatcher(): void {
+        if (this.watcher) {
+            return;
+        }
         this.watcher = vscode.workspace.createFileSystemWatcher('**/*.vue');
         this.watcher.onDidCreate(uri => this.addEntry(uri));
         this.watcher.onDidDelete(uri => this.removeEntry(uri));
@@ -84,6 +91,7 @@ export class VueComponentIndex implements vscode.Disposable {
         const pascal = toPascalCase(base);
         const kebab = toKebabCase(base);
         const entry: IndexEntry = { name: base, pascal, kebab, uri };
+        this.removeEntry(uri);
         this.entries.push(entry);
         pushToMap(this.byPascal, pascal, entry);
         pushToMap(this.byKebab, kebab, entry);

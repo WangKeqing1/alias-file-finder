@@ -221,7 +221,7 @@ function makePropCompletion(
     item.detail = `${fileName}  prop`;
 
     const md = new vscode.MarkdownString();
-    md.isTrusted = true;
+    md.isTrusted = false;
     if (prop.type) {
         md.appendMarkdown(`**类型**：\`${prop.type}\`\n\n`);
     }
@@ -252,7 +252,7 @@ function makeEmitCompletion(
     item.detail = `${fileName}  emit`;
 
     const md = new vscode.MarkdownString();
-    md.isTrusted = true;
+    md.isTrusted = false;
     if (emit.signature) {
         md.appendMarkdown(`**参数**：\`${emit.signature}\`\n\n`);
     }

@@ -9,10 +9,7 @@ export interface AliasMap {
 
 interface CacheEntry {
     aliases: AliasMap;
-    expireAt: number;
 }
-
-const CACHE_TTL = 5 * 1000;
 
 const cache = new Map<string, CacheEntry>();
 
@@ -22,9 +19,8 @@ export function clearAliasCache(): void {
 
 export function getAliases(workspaceFolder: vscode.WorkspaceFolder): AliasMap {
     const cwd = workspaceFolder.uri.fsPath;
-    const now = Date.now();
     const cached = cache.get(cwd);
-    if (cached && cached.expireAt > now) {
+    if (cached) {
         return cached.aliases;
     }
 
@@ -39,7 +35,7 @@ export function getAliases(workspaceFolder: vscode.WorkspaceFolder): AliasMap {
 
     ensureCommonDefaults(aliases, cwd);
 
-    cache.set(cwd, { aliases, expireAt: now + CACHE_TTL });
+    cache.set(cwd, { aliases });
     affLog('aliases:reload', {
         cwd,
         keys: Object.keys(aliases),

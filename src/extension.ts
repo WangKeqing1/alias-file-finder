@@ -86,8 +86,8 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.workspace.onDidSaveTextDocument(doc => {
             if (doc.languageId === 'vue') {
-                clearVueParserCache();
-                vueProvideInjectIndex.invalidate();
+                clearVueParserCache(doc.uri.fsPath);
+                vueProvideInjectIndex.updateUri(doc.uri);
             }
         })
     );
@@ -106,7 +106,6 @@ export function activate(context: vscode.ExtensionContext) {
             clearAliasCache();
             clearVueParserCache();
             vueProvideInjectIndex.invalidate();
-            void vueProvideInjectIndex.ensureReady();
             vscode.window.showInformationMessage('Alias File Finder：缓存已清除');
         })
     );

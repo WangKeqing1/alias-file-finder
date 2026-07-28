@@ -43,7 +43,11 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 
-export function clearVueParserCache(): void {
+export function clearVueParserCache(filePath?: string): void {
+    if (filePath) {
+        cache.delete(filePath);
+        return;
+    }
     cache.clear();
 }
 
